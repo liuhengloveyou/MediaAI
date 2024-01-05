@@ -7,6 +7,8 @@
 #include <fstream>
 #include <random>
 
+#include <opencv2/opencv.hpp>
+
 extern "C"
 {
 #include <libavcodec/avcodec.h>
@@ -23,4 +25,4 @@ extern "C"
 AVFrame *detect(AVFrame *frame);
 
 int ReadCocoYaml(YOLO_V8 *&p);
-int InitDetect(std::string modelPath);
+int InitDetect(std::string path);

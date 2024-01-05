@@ -493,6 +493,7 @@ int Transcode::DecodePacket(AVPacket *packet)
         // 调yolo
         yoloFrame = detect(frame);
         yoloFrame->pts = frame->pts;
+        // yoloFrame->duration = frame->duration;
 
         if ((ret = EncodeWrite(packet, yoloFrame)) < 0)
         {

@@ -7,10 +7,14 @@
 #include "inference.h"
 #include "detector.h"
 #include "frame_utils.h"
+#include "yolov8_utils.h"
+#include "yolov8_opencv_detector.h"
 
 #define IMG_SIZE 640
+using namespace std;
 
 static YOLO_V8 *yoloDetector;
+static Yolov8CV *cvdetect;
 
 // void Detector(YOLO_V8 *&p)
 // {
@@ -33,6 +37,67 @@ static YOLO_V8 *yoloDetector;
 //     }
 // }
 
+template <typename _Tp>
+int yolov8_cv_detect(_Tp &cls, cv::Mat &img)
+{
+    // 生成随机颜色
+    std::vector<cv::Scalar> color;
+    srand(time(0));
+    for (int i = 0; i < 80; i++)
+    {
+        int b = rand() % 256;
+        int g = rand() % 256;
+        int r = rand() % 256;
+        color.push_back(cv::Scalar(b, g, r));
+    }
+
+    vector<OutputSeg> result;
+    if (cls.detect(img, result))
+    {
+        DrawPred(img, result, cls._className, color);
+    }
+    else
+    {
+        cout << "Detect Failed!" << std::endl;
+    }
+
+    return 0;
+}
+
+template <typename _Tp>
+int yolov8_onnx(_Tp &cls, cv::Mat &img, string &model_path)
+{
+    if (cls.ReadModel(model_path, false))
+    {
+        cout << "read net ok!" << std::endl;
+    }
+    else
+    {
+        return -1;
+    }
+    // 生成随机颜色
+    std::vector<cv::Scalar> color;
+    srand(time(0));
+    for (int i = 0; i < 80; i++)
+    {
+        int b = rand() % 256;
+        int g = rand() % 256;
+        int r = rand() % 256;
+        color.push_back(cv::Scalar(b, g, r));
+    }
+    std::vector<OutputSeg> result;
+    if (cls.OnnxDetect(img, result))
+    {
+        DrawPred(img, result, cls._className, color);
+    }
+    else
+    {
+        std::cout << "Detect Failed!" << std::endl;
+    }
+
+    return 0;
+}
+
 AVFrame *detect(AVFrame *frame)
 {
     if (!frame)
@@ -42,36 +107,38 @@ AVFrame *detect(AVFrame *frame)
 
     cv::Mat img = AVFrameToCvMat(frame);
 
-    std::vector<DL_RESULT> res;
-    yoloDetector->RunSession(img, res);
+    yolov8_cv_detect(*cvdetect, img);
 
-    for (auto &re : res)
-    {
-        cv::RNG rng(cv::getTickCount());
-        cv::Scalar color(rng.uniform(0, 256), rng.uniform(0, 256), rng.uniform(0, 256));
+    // std::vector<DL_RESULT> res;
+    // yoloDetector->RunSession(img, res);
 
-        cv::rectangle(img, re.box, color, 3);
+    // for (auto &re : res)
+    // {
+    //     cv::RNG rng(cv::getTickCount());
+    //     cv::Scalar color(rng.uniform(0, 256), rng.uniform(0, 256), rng.uniform(0, 256));
 
-        float confidence = floor(100 * re.confidence) / 100;
-        std::cout << std::fixed << std::setprecision(2);
-        std::string label = yoloDetector->classes[re.classId] + " " + std::to_string(confidence).substr(0, std::to_string(confidence).size() - 4);
+    //     cv::rectangle(img, re.box, color, 3);
 
-        cv::rectangle(
-            img,
-            cv::Point(re.box.x, re.box.y - 25),
-            cv::Point(re.box.x + label.length() * 15, re.box.y),
-            color,
-            cv::FILLED);
+    //     float confidence = floor(100 * re.confidence) / 100;
+    //     std::cout << std::fixed << std::setprecision(2);
+    //     std::string label = yoloDetector->classes[re.classId] + " " + std::to_string(confidence).substr(0, std::to_string(confidence).size() - 4);
 
-        cv::putText(
-            img,
-            label,
-            cv::Point(re.box.x, re.box.y - 5),
-            cv::FONT_HERSHEY_SIMPLEX,
-            0.75,
-            cv::Scalar(0, 0, 0),
-            2);
-    }
+    //     cv::rectangle(
+    //         img,
+    //         cv::Point(re.box.x, re.box.y - 25),
+    //         cv::Point(re.box.x + label.length() * 15, re.box.y),
+    //         color,
+    //         cv::FILLED);
+
+    //     cv::putText(
+    //         img,
+    //         label,
+    //         cv::Point(re.box.x, re.box.y - 5),
+    //         cv::FONT_HERSHEY_SIMPLEX,
+    //         0.75,
+    //         cv::Scalar(0, 0, 0),
+    //         2);
+    // }
 
     return CVMatToAVFrame(img);
 }
@@ -127,6 +194,10 @@ int ReadCocoYaml(YOLO_V8 *&p)
 
 int InitDetect(std::string modelPath)
 {
+    std::string model_path = "./models/yolov8n.onnx";
+	cvdetect = new Yolov8CV(model_path);
+    return 0;
+
     yoloDetector = new YOLO_V8;
     ReadCocoYaml(yoloDetector);
 
