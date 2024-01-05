@@ -323,7 +323,7 @@ static int open_encoder()
     AVDictionary *opts = NULL;
     AVStream *ost;
 
-    // STEP::根据解码器创建编码器，因为单纯的转编码无法改变音视频基础参数，如分辨率、采样率等，所以这些参数只能复制
+    // 根据解码器创建编码器，因为单纯的转编码无法改变音视频基础参数，如分辨率、采样率等，所以这些参数只能复制
     for (int i = 0; i < streamContextLength; i++)
     {
         if (!streamContextMapping[i].decoder_ctx)
@@ -375,7 +375,6 @@ static int open_encoder()
             //  encoder->gop_size = 40;
             //  encoder->max_b_frames = 0;
             // encoder->bit_rate = 2000000;
-
             // we need to ref hw_frames_ctx of decoder to initialize encoder's codec.
             // Only after we get a decoded frame, can we obtain its hw_frames_ctx
 
@@ -407,7 +406,6 @@ static int open_encoder()
             {
                 fprintf(stderr, "Failed to open encode codec. Error code: %s\n", my_av_err2str(ret));
                 av_dict_free(&opts);
-
                 return -1;
             }
             av_dict_free(&opts);

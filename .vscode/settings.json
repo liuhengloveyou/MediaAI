@@ -68,6 +68,7 @@
         "avutil.h": "c",
         "swresample.h": "c",
         "avcodec.h": "c",
-        "hwcontext.h": "c"
+        "hwcontext.h": "c",
+        "cinttypes": "cpp"
     }
 }
