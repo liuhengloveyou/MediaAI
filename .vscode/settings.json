@@ -69,6 +69,8 @@
         "swresample.h": "c",
         "avcodec.h": "c",
         "hwcontext.h": "c",
-        "cinttypes": "cpp"
+        "cinttypes": "cpp",
+        "xloctime": "cpp",
+        "filesystem": "cpp"
     }
 }

@@ -9,6 +9,10 @@ extern "C"
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
+#include <libavutil/timestamp.h>
+#include <libavfilter/avfilter.h>
+#include <libavcodec/bsf.h>
+#include "libswscale/swscale.h"
 
 #ifdef __cplusplus
 }
@@ -41,6 +45,8 @@ private:
     int DecodePacket(AVPacket *packet);                // 解码
     int EncodeWrite(AVPacket *packet, AVFrame *frame); // 编码
     int TransCodePkt(AVPacket *packet, AVFrame *frame);
+    int OpenBitstreamFilter(AVStream *stream, AVBSFContext **bsf_ctx, const char *name);
+    int FilterStream(AVBSFContext *bsf_ctx, AVFormatContext *ofmt_ctx, AVStream *in_stream, AVStream *out_stream, AVPacket *pkt);
 
 private:
     // 输入输出文件地址
@@ -58,4 +64,5 @@ private:
     StreamContext *streamContextMap = nullptr;
     int streamContextLength = 0;
     int video_stream_index = -1;
+    bool is_annexb = false;
 };

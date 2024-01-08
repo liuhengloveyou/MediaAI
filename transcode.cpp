@@ -4,6 +4,8 @@
 
 extern "C"
 {
+#include <libavutil/macros.h>
+#include <libavutil/timestamp.h>
 #include <libavutil/timestamp.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -11,7 +13,7 @@ extern "C"
 }
 
 #include "transcode.h"
-#include "detector.h"
+// #include "detector.h"
 
 static inline char *my_av_err2str(int errnum)
 {
@@ -73,12 +75,12 @@ int Transcode::Init()
     int ret = 0;
 
     // 打开硬件上下文
-    ret = av_hwdevice_ctx_create(&hwDeviceCtx, AV_HWDEVICE_TYPE_QSV, NULL, NULL, 0);
-    if (ret < 0)
-    {
-        hwDeviceCtx = nullptr;
-        fprintf(stderr, "!!!Failed to create a QSV device. Error: %d %s\n", ret, my_av_err2str(ret));
-    }
+    // ret = av_hwdevice_ctx_create(&hwDeviceCtx, AV_HWDEVICE_TYPE_QSV, NULL, NULL, 0);
+    // if (ret < 0)
+    // {
+    //     hwDeviceCtx = nullptr;
+    //     fprintf(stderr, "!!!Failed to create a QSV device. Error: %d %s\n", ret, my_av_err2str(ret));
+    // }
 
     ret = OpenInStream();
     if (ret)
@@ -90,6 +92,16 @@ int Transcode::Init()
     if (ret)
     {
         return ret;
+    }
+
+    // 初始化bsf filter
+    if (is_annexb)
+    {
+        // if (ret = open_bitstream_filter(remuxer->video_stream, &remuxer->bsf_ctx, "h264_mp4toannexb") < 0)
+        // {
+        //     fprintf(stderr, "open_bitstream_filter failed, ret=%d\n", ret);
+        //     return ret;
+        // }
     }
 
     return 0;
@@ -104,6 +116,10 @@ int Transcode::OpenInStream()
 
     AVDictionary *optionsDict = NULL;                   // 设置输入源封装参数
     av_dict_set(&optionsDict, "rw_timeout", "2000", 0); // 设置网络超时
+    av_dict_set(&optionsDict, "sdp_flags", "custom_io", 0);
+    av_dict_set_int(&optionsDict, "reorder_queue_size", 0, 0);
+    av_dict_set(&optionsDict, "rtsp_transport", "tcp", 0);
+    av_dict_set(&optionsDict, "buffer_size", "102400", 0); //设置缓存大小，1080p可将值调大
     int ret = avformat_open_input(&inFmtCtx, inUrl, NULL, &optionsDict);
     if (ret < 0)
     {
@@ -126,6 +142,7 @@ int Transcode::OpenInStream()
         fprintf(stderr, "Cannot find a video stream in the input file. Error code: %s\n", my_av_err2str(ret));
         return video_stream_index;
     }
+    // is_annexb = strcmp(av_fourcc2str(inFmtCtx->streams[video_stream_index]->codecpar->codec_tag), "avc1") >= 0 ? 1 : 0;
 
     // 根据源轨道信息创建streamContextMapping
     streamContextLength = inFmtCtx->nb_streams;
@@ -211,9 +228,7 @@ int Transcode::OpenInStream()
                 return AVERROR(ENOMEM);
             }
             decoder_ctx->framerate = av_guess_frame_rate(inFmtCtx, inStream, NULL);
-            // decoder->time_base = AV_TIME_BASE_Q; // 固定TimeBase为1/1000000
             decoder_ctx->pkt_timebase = inStream->time_base;
-
             if (hwDeviceCtx)
             {
                 decoder_ctx->hw_device_ctx = av_buffer_ref(hwDeviceCtx);
@@ -292,6 +307,10 @@ int Transcode::OpenOutStream()
         }
 
         outStream->codecpar->codec_tag = 0;
+        if (outStream->codecpar->codec_id == AV_CODEC_ID_HEVC)
+        {
+            outStream->codecpar->codec_tag = MKTAG('h', 'v', 'c', '1');
+        }
         streamContextMap[i].outIndex = outStreamIndex++; // 记录源文件轨道序号与输出文件轨道序号的对应关系
     }
 
@@ -304,7 +323,28 @@ int Transcode::OpenOutStream()
     }
 
     /* write the stream header */
-    if ((ret = avformat_write_header(outFmtCtx, NULL)) < 0)
+    AVDictionary *options = NULL;
+    if ((ret = av_dict_set(&options, "hls_time", "3", 0)) < 0)
+    {
+        fprintf(stderr, "Failed to set listen mode for server: %s\n", my_av_err2str(ret));
+        return ret;
+    }
+    if ((ret = av_dict_set(&options, "hls_list_size", "0", 0)) < 0)
+    {
+        fprintf(stderr, "Failed to set listen mode for server: %s\n", my_av_err2str(ret));
+        return ret;
+    }
+    if ((ret = av_dict_set(&options, "hls_wrap", "0", 0)) < 0)
+    {
+        fprintf(stderr, "Failed to set listen mode for server: %s\n", my_av_err2str(ret));
+        return ret;
+    }
+    if ((ret = av_dict_set(&options, "v", "hvc1", 0)) < 0)
+    {
+        fprintf(stderr, "av_dict_set Error: %s\n", my_av_err2str(ret));
+        return ret;
+    }
+    if ((ret = avformat_write_header(outFmtCtx, &options)) < 0)
     {
         fprintf(stderr, "Could not write stream header to out file: %s\n", my_av_err2str(ret));
         return ret;
@@ -351,6 +391,7 @@ int Transcode::OpenEncoder()
                 return AVERROR(ENOMEM);
             }
 
+            printf(">>>>>>>>>>>>>>>>>>>>>>>>>%d %d %s\n", AV_CODEC_ID_HEVC, encoder_ctx->codec_id, encoder_ctx->codec_tag);
             // 从流信息拷贝参数到解码器上下文
             // ret = avcodec_parameters_to_context(encoder_ctx, outFmtCtx->streams[0]->codecpar);
             // if (ret < 0)
@@ -384,8 +425,6 @@ int Transcode::OpenEncoder()
             {
                 encoder_ctx->pix_fmt = decoder_ctx->pix_fmt;
             }
-            // printf("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@%d %d\n\n", encoder_ctx->framerate, encoder_ctx->time_base.den);
-            // sleep(10);
 
             AVDictionary *opts = NULL;
             // av_dict_set(&optionsDict, "threads", "2", 0);
@@ -432,6 +471,11 @@ int Transcode::EncodeWrite(AVPacket *packet, AVFrame *frame)
 
         packet->stream_index = 0;
         av_packet_rescale_ts(packet, encoder_ctx->time_base, outFmtCtx->streams[outIndex]->time_base);
+        if (packet->duration == 0)
+        {
+            packet->duration = av_rescale_q(1, encoder_ctx->time_base, outFmtCtx->streams[outIndex]->time_base);
+        }
+
         if ((ret = av_interleaved_write_frame(outFmtCtx, packet)) < 0)
         {
             fprintf(stderr, "Error during writing data to output file. Error: %s\n", my_av_err2str(ret));
@@ -491,11 +535,11 @@ int Transcode::DecodePacket(AVPacket *packet)
 
         frame->pts = av_rescale_q(frame->pts, decoder_ctx->pkt_timebase, encoder_ctx->time_base);
         // 调yolo
-        yoloFrame = detect(frame);
-        yoloFrame->pts = frame->pts;
+        // yoloFrame = detect(frame);
+        // yoloFrame->pts = frame->pts;
         // yoloFrame->duration = frame->duration;
 
-        if ((ret = EncodeWrite(packet, yoloFrame)) < 0)
+        if ((ret = EncodeWrite(packet, frame)) < 0)
         {
             fprintf(stderr, "Error during encoding and writing.\n");
         }
@@ -594,6 +638,61 @@ int Transcode::TransCodePkt(AVPacket *packet, AVFrame *frame)
     return 0;
 }
 
+// 初始化 bsf 过滤器
+int Transcode::OpenBitstreamFilter(AVStream *stream, AVBSFContext **bsf_ctx, const char *name)
+{
+    int ret = 0;
+
+    const AVBitStreamFilter *filter = av_bsf_get_by_name(name);
+    if (!filter)
+    {
+        ret = -1;
+        fprintf(stderr, "Unknow bitstream filter.\n");
+    }
+    if ((ret = av_bsf_alloc(filter, bsf_ctx) < 0))
+    {
+        fprintf(stderr, "av_bsf_alloc failed\n");
+        return ret;
+    }
+    if ((ret = avcodec_parameters_copy((*bsf_ctx)->par_in, stream->codecpar)) < 0)
+    {
+        fprintf(stderr, "avcodec_parameters_copy failed, ret=%d\n", ret);
+        return ret;
+    }
+    if ((ret = av_bsf_init(*bsf_ctx)) < 0)
+    {
+        fprintf(stderr, "av_bsf_init failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    return ret;
+}
+
+// bsf 过滤器
+int Transcode::FilterStream(AVBSFContext *bsf_ctx, AVFormatContext *ofmt_ctx, AVStream *in_stream, AVStream *out_stream, AVPacket *pkt)
+{
+    int ret = 0;
+    if (ret = av_bsf_send_packet(bsf_ctx, pkt) < 0)
+    {
+        fprintf(stderr, "av_bsf_send_packet failed, ret=%d\n", ret);
+        return ret;
+    }
+
+    while ((ret = av_bsf_receive_packet(bsf_ctx, pkt) == 0))
+    {
+        ret = av_interleaved_write_frame(ofmt_ctx, pkt);
+        if (ret < 0)
+            return ret;
+
+        av_packet_unref(pkt);
+    }
+
+    if (ret == AVERROR(EAGAIN))
+        return 0;
+
+    return ret;
+}
+
 int Transcode::Run()
 {
     int ret = 0;
@@ -625,7 +724,7 @@ int Transcode::Run()
         // 需要转编码的轨道
         if (streamContextMap[packet->stream_index].decoderCtx)
         {
-            printf("packet in: %d %ld %ld duration:%ld; time_base: %d\n", packet->stream_index, packet->pts, packet->dts, packet->duration, streamContextMap[packet->stream_index].decoderCtx->time_base.den);
+            // printf("packet in: %d %ld %ld duration:%ld; time_base: %d\n", packet->stream_index, packet->pts, packet->dts, packet->duration, streamContextMap[packet->stream_index].decoderCtx->time_base.den);
             DecodePacket(packet);
         }
         else // 不需要转编码的轨道
@@ -679,9 +778,25 @@ int Transcode::Run()
 
     // 关闭输入文件，并销毁具柄
     avformat_close_input(&inFmtCtx);
-
+    fprintf(stderr, "\n\nEND\n\n");
     av_packet_free(&packet);
     av_frame_free(&frame);
 
     return 0;
+}
+
+/*
+g++  transcode.cpp -D__STDC_CONSTANT_MACROS -I. -ID:/dev/av/ffmpeg-6.1-full_build-shared/include -LD:/dev/av/ffmpeg-6.1-full_build-shared/lib -lavcodec -lavformat -lswscale -lswresample -lavutil
+
+*/
+
+int main(int argc, char *argv[])
+{
+    const char *in = "rtsp://admin:qwer1234@172.29.251.10:554/h264/ch33/main/av_stream"; // "D:/input.mp4";  //
+    const char *out = "./a.m3u8";
+
+    Transcode tran(in, out);
+    int ret = tran.Init();
+    printf("init: %d\n", ret);
+    tran.Run();
 }
